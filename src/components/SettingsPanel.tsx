@@ -9,6 +9,8 @@ interface SettingsPanelProps {
   overrideKey: string;
   hasKey: boolean;
   onKeyChange: (key: string) => void;
+  useCascade?: boolean;
+  onCascadeChange?: (v: boolean) => void;
 }
 
 export function SettingsPanel({
@@ -16,6 +18,8 @@ export function SettingsPanel({
   overrideKey,
   hasKey,
   onKeyChange,
+  useCascade,
+  onCascadeChange,
 }: SettingsPanelProps) {
   const [keyCheck, setKeyCheck] = useState<{
     status: "idle" | "checking" | "ok" | "fail";
@@ -91,6 +95,18 @@ export function SettingsPanel({
       <p className="muted small" style={{ marginTop: 8 }}>
         Модель перевода: <strong>MiMo V2.5</strong> · vision/OCR. Автоматически смотрит на каждую страницу как картинку — формулы и графики переводятся «глазами», а не текстом.
       </p>
+      {onCascadeChange && (
+        <label className="muted small" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+          <input
+            type="checkbox"
+            checked={!!useCascade}
+            onChange={(e) => onCascadeChange(e.target.checked)}
+          />
+          <span>
+            <strong>v2 каскад</strong> · 5 проходов (omni → omni-mid → flash → pro → flash). Дороже, точнее формулы и фигуры.
+          </span>
+        </label>
+      )}
     </section>
   );
 }

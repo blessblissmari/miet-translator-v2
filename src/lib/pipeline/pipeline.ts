@@ -97,6 +97,8 @@ export async function runPipeline(opts: RunOpts): Promise<RunResult> {
   return { ...state, finalMarkdown: assembled };
 }
 
+export { runPipeline as runCascade };
+
 function assemble(pages: TranslatedPage[]): string {
   return pages
     .sort((a, b) => a.idx - b.idx)

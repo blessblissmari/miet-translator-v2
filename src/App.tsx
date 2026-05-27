@@ -4,6 +4,8 @@ import { saveAs } from "file-saver";
 import { planSlides, planDoc } from "./lib/planner";
 import { buildPptx } from "./lib/pptxBuild";
 import { buildDocx } from "./lib/docxBuild";
+import { runCascade } from "./lib/pipeline/pipeline";
+import { translatedToSlides, translatedToDoc } from "./lib/pipeline/adapter";
 import { FREE_MODELS, DEFAULT_MODEL, DEFAULT_API_KEY } from "./lib/mimo";
 import { expandInputs, type IntakeFile } from "./lib/intake";
 import { extractAny, suggestKind } from "./lib/extractAny";
@@ -27,6 +29,7 @@ export default function App() {
   const apiKey = overrideKey.trim() || DEFAULT_API_KEY;
   const hasKey = !!apiKey;
   const [model, setModel] = useLocalStorage<string>("mimo_model", DEFAULT_MODEL);
+  const [useCascade, setUseCascade] = useLocalStorage<boolean>("v2_cascade", false);
 
   // One-time migration from the legacy OpenRouter storage keys.
   // We used to store the API key under "openrouter_key" and the selected
@@ -161,9 +164,27 @@ export default function App() {
       };
 
       if (it.kind === "presentation") {
-        const slides = await planSlides(extracted, opts);
+        let slides;
+        if (useCascade) {
+          updateItem(it.id, { message: "v2 каскад: 5-проходный конвейер…" });
+          const pdfBytes = new Uint8Array(await it.blob.arrayBuffer());
+          const cascadeOut = await runCascade({
+            apiKey,
+            pdf: pdfBytes,
+            name: it.path,
+            signal,
+            onProgress: (p: number, msg?: string) =>
+              updateItem(it.id, {
+                progress: { done: Math.round(p * extracted.pages.length), total: extracted.pages.length },
+                message: msg ?? undefined,
+              }),
+          });
+          slides = translatedToSlides(cascadeOut.translated ?? [], extracted.pages);
+        } else {
+          slides = await planSlides(extracted, opts);
+        }
         if (signal?.aborted) throw new Error("aborted");
-        updateItem(it.id, { status: "building", message: "Сборка PPTX…", slides });
+        updateItem(it.id, { status: "building", message: "Сборка PPTX (МИЭТ-шаблон)…", slides });
         const blob = await buildPptx(slides);
         const name = (it.path.replace(/\.[^./]+$/, "").split("/").pop() || "result") + "_MIET_ru.pptx";
         updateItem(it.id, {
@@ -175,7 +196,25 @@ export default function App() {
           elapsedMs: Date.now() - startedAt,
         });
       } else {
-        const doc = await planDoc(extracted, opts);
+        let doc;
+        if (useCascade) {
+          updateItem(it.id, { message: "v2 каскад: 5-проходный конвейер…" });
+          const pdfBytes = new Uint8Array(await it.blob.arrayBuffer());
+          const cascadeOut = await runCascade({
+            apiKey,
+            pdf: pdfBytes,
+            name: it.path,
+            signal,
+            onProgress: (p: number, msg?: string) =>
+              updateItem(it.id, {
+                progress: { done: Math.round(p * extracted.pages.length), total: extracted.pages.length },
+                message: msg ?? undefined,
+              }),
+          });
+          doc = translatedToDoc(cascadeOut.translated ?? [], extracted.pages);
+        } else {
+          doc = await planDoc(extracted, opts);
+        }
         if (signal?.aborted) throw new Error("aborted");
         updateItem(it.id, { status: "building", message: "Сборка DOCX…", doc });
         const blob = await buildDocx(doc);
@@ -392,6 +431,8 @@ export default function App() {
             overrideKey={overrideKey}
             hasKey={hasKey}
             onKeyChange={setOverrideKey}
+            useCascade={useCascade}
+            onCascadeChange={setUseCascade}
           />
         )}
 
