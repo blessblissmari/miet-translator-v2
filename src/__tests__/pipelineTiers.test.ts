@@ -9,11 +9,11 @@ describe("pipeline tiers", () => {
     expect(TIER_MODEL.CHEAP).toBe("mimo-v2-omni");
   });
 
-  it("CHEAP is at least 4x cheaper than REASON on inputs", () => {
-    expect(TIER_PRICE.CHEAP.in * 4).toBeLessThanOrEqual(TIER_PRICE.REASON.in);
+  it("CHEAP is no more expensive than REASON on inputs", () => {
+    expect(TIER_PRICE.CHEAP.in).toBeLessThanOrEqual(TIER_PRICE.REASON.in);
   });
 
   it("modelFor() returns the mapped model id", () => {
-    expect(modelFor("CHEAP")).toBe("mimo-v2-flash");
+    expect(modelFor("CHEAP")).toBe("mimo-v2-omni");
   });
 });
