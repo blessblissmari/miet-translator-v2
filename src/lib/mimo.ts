@@ -39,15 +39,27 @@ const MODELS_URL = `${API_BASE}/models`;
 export const FREE_MODELS: MimoModel[] = [
   {
     id: "mimo-v2.5",
-    label: "MiMo V2.5 · мультимодал (текст + зрение)",
+    label: "MiMo V2.5 · omnimodal (vision+audio+video, 1M ctx) — best",
     vision: true,
-    context: 128_000,
+    context: 1_000_000,
+  },
+  {
+    id: "mimo-v2.5-pro",
+    label: "MiMo V2.5 Pro · text reasoning (1M ctx)",
+    vision: false,
+    context: 1_000_000,
   },
   {
     id: "mimo-v2-omni",
-    label: "MiMo V2 Omni · мультимодал, всеядный",
+    label: "MiMo V2 Omni · vision (256K ctx) — per-page workhorse",
     vision: true,
-    context: 64_000,
+    context: 256_000,
+  },
+  {
+    id: "mimo-v2-flash",
+    label: "MiMo V2 Flash · cheap text (256K) — sverka & watchdog",
+    vision: false,
+    context: 256_000,
   },
 ];
 
@@ -57,6 +69,8 @@ export const DEFAULT_MODEL = "mimo-v2.5";
 const FALLBACK_CHAIN: Record<string, string[]> = {
   "mimo-v2.5": ["mimo-v2-omni"],
   "mimo-v2-omni": ["mimo-v2.5"],
+  "mimo-v2.5-pro": ["mimo-v2-pro", "mimo-v2-flash"],
+  "mimo-v2-flash": ["mimo-v2.5-pro"],
 };
 
 // -- Rate-limit memory ------------------------------------------------------

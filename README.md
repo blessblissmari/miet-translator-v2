@@ -1,98 +1,153 @@
-# MIET Translator Pro
+# MIET Translator Pro · v2 (rework)
 
-Веб-приложение, которое переводит англоязычные академические **PDF / DOCX / PPTX** в русские
-документы и презентации в шаблоне МИЭТ. Полностью браузерное: всё извлечение и сборка происходит
-на клиенте, на сервер уходит только текст в Xiaomi MiMo для перевода.
+Веб-приложение, переводящее английские академические **PDF / DOCX / PPTX**
+(а также `zip / rar / 7z` с такими файлами) в качественные русские DOCX/PPTX
+в шаблоне МИЭТ.
 
-**Live:** https://blessblissmari.github.io/miet-translator-pro/
+> **v2 — каскадный конвейер из 5 проходов** с разными моделями MiMo для
+> разных задач (vision-omni на тяжёлых, дешёвый flash на сверке/QA).
+> Подробности концепции — в [`REWORK.md`](./REWORK.md).
+>
+> Полный путь миграции: старый `docPlanner` ещё работает как fallback. См.
+> [`HANDSOFF.md`](./HANDSOFF.md) для истории до v2.
 
-> Форк/наследник [miet-translator](https://github.com/blessblissmari/miet-translator)
-> с улучшениями по продакшен-спеке: «Tinder»-флоу распределения, очерёдность DOCX→PPTX,
-> расширенный ЦОС-глоссарий, отчёт + лог в архиве, ГОСТ-стили DOCX, E2E-тесты.
+**Live (v1):** https://blessblissmari.github.io/miet-translator-pro/
 
-## Два режима работы
+---
 
-### 1. Веб-приложение (по умолчанию)
+## Алгоритм v2 (TL;DR)
 
-Полностью браузерное: открываешь сайт, вставляешь ключ MiMo (Xiaomi), кидаешь
-файлы / папку / `.zip` / `.rar` / `.7z`, тиндер-карточками раскидываешь по DOCX /
-PPTX / пропуск, жмёшь «Запустить». Документы идут первыми, потом презентации,
-после — скачиваешь ZIP с результатами, отчётом и логом.
+```
+input → normalize (→PDF) → pdf.js render
+   │
+   ├── Pass 1: GLOBAL OCR + LAYOUT MAP        mimo-v2.5         (omni, 1M)
+   ├── Pass 2: PER-PAGE OCR                   mimo-v2-omni      (omni, 256K)
+   ├── Pass 3: SVERKA с pdf.js текстом        mimo-v2-flash     (cheap)
+   ├── Pass 4: АКАДЕМИЧЕСКИЙ ПЕРЕВОД          mimo-v2.5-pro     (reason)
+   └── Pass 5: WATCHDOG (QA-патчи)            mimo-v2-flash     (cheap)
+   │
+   ▼  собираем русский markdown → DOCX (OMML) / PPTX (шаблон МИЭТ)
+```
 
-### 2. Node CLI (`tools/cli`) — продакшен-качество
+| Pass | Tier        | Model              | Зачем                                                 |
+|------|-------------|--------------------|-------------------------------------------------------|
+| 1    | `OMNI_BEST` | `mimo-v2.5`        | один заход — карта layout всего документа (1M ctx)    |
+| 2    | `OMNI_MID`  | `mimo-v2-omni`     | постраничный OCR с подсказкой из Pass 1               |
+| 3    | `CHEAP`     | `mimo-v2-flash`    | diff OCR ↔ pdf.js (что пропустили, что переврали)     |
+| 4    | `REASON`    | `mimo-v2.5-pro`    | финальный перевод с глоссарием МИЭТ + ЦОС             |
+| 5    | `CHEAP`     | `mimo-v2-flash`    | патчи: голый LaTeX, CJK, orphan-картинки, англицизмы  |
 
-Когда нужен пакетный прогон или **настоящие Office-уравнения** в DOCX:
+Тиры — это **роли**. Чтобы переключить модель — правь
+[`src/lib/pipeline/tiers.ts`](src/lib/pipeline/tiers.ts).
 
-| pipeline | input | output |
-| --- | --- | --- |
-| `translate-docs-pandoc.mjs` | текстовый PDF | DOCX через pandoc — `$..$` / `$$..$$` рендерится в нативный OMML |
-| `translate-slides.mjs` | слайды (landscape PDF) | PPTX в шаблоне МИЭТ |
-| `translate-scan.mjs` | скан / фото / рукопись | OCR vision-моделью + pandoc → DOCX |
+### Что с рисунками и графиками
 
-См. [`tools/cli/README.md`](tools/cli/README.md). Бэкенд: тот же ЦОС-глоссарий,
-sanitizer LaTeX-команд (`\Bigl`, `\includegraphics`, ...), отключение reasoning
-для gpt-oss моделей.
+- **Растровые рисунки** вырезаются из PDF через `pdfimages` (CLI) /
+  pdf.js (web).
+- **Векторные графики** (TikZ/PGFPlots/matplotlib) рендерим страничным
+  crop'ом по bbox из Pass 1 → PNG на белом фоне.
+- **Перерисовка с русскими подписями** — через
+  [`tools/cli/redraw-figure.py`](tools/cli/redraw-figure.py)
+  (matplotlib, фон белый, dpi=200).
 
-## Что нового по сравнению с базой
+### Что с превью
 
-| Область | Изменение |
-|---|---|
-| Очередь | Сначала отрабатывают все DOCX, потом все PPTX (ТЗ §2.2). |
-| UX | Пауза / Продолжить / Стоп. Кнопка «Повторить все ошибки». |
-| Экспорт | В архив попадают `report.md` и `log.txt` помимо результатов. |
-| Перевод | Статический ЦОС-глоссарий (~90 терминов: FIR/IIR/FFT/Найквист/Баттерворт/…) подаётся в каждый промпт и пост-обработкой подменяет оставшиеся английские термины. |
-| DOCX | Times New Roman 14pt, межстрочный 1.5, ГОСТ-поля (30/20/20/15 мм). |
-| Слайды | Из переводов убираются copyright/номера слайдов; промпт инструктирует использовать Юникод для коротких формул. |
-| Архивы | Поддержка `.zip / .rar / .7z / .tar / .tar.gz` через libarchive.js (WASM). |
-| Тесты | Добавлены unit-тесты глоссария + сценарий E2E (Playwright, опционально). |
+- **DOCX** — отображается как в Word через библиотеку `docx-preview`
+  (см. [`src/components/DocxView.tsx`](src/components/DocxView.tsx)).
+- **PPTX** — конвертируется в PDF через LibreOffice headless
+  (см. [`tools/cli/convert-to-pdf.mjs`](tools/cli/convert-to-pdf.mjs))
+  и показывается через pdf.js
+  (см. [`src/components/PptxView.tsx`](src/components/PptxView.tsx)).
+
+---
+
+## Структура кода
+
+```
+src/lib/
+  mimo.ts               # клиент MiMo: 4 модели, fallback chain, key rotation
+  pipeline/
+    tiers.ts            # OMNI_BEST / OMNI_MID / REASON / CHEAP → model IDs
+    types.ts            # LayoutMap, PageOCR, SverkaPatch, TranslatedPage, ...
+    normalize.ts        # docx/pptx/archive → PDF
+    pass1-layout.ts     # глобальная layout-карта
+    pass2-pages.ts      # постраничный OCR
+    pass3-sverka.ts     # сверка с pdf.js
+    pass4-translate.ts  # академический перевод
+    pass5-watchdog.ts   # финальный QA-патч
+    pipeline.ts         # оркестратор всех 5 проходов
+
+src/components/
+  DocxView.tsx          # DOCX preview (как в Word)
+  PptxView.tsx          # PPTX preview (через PDF)
+
+tools/cli/
+  convert-to-pdf.mjs    # LibreOffice headless (DOCX/PPTX → PDF) [CLI + HTTP]
+  redraw-figure.py      # matplotlib: график → PNG на белом фоне
+```
+
+Старые модули (`docPlanner.ts`, `slidePlanner.ts`, и т.д.) пока остаются —
+ими сейчас и крутится App.tsx. Переключение `App.tsx` на новый pipeline —
+следующий шаг (см. список ниже).
+
+---
+
+## Запуск конвертера PDF локально
+
+Нужно для DOCX/PPTX → PDF (и для отображения PPTX в браузере).
+
+```bash
+apt install -y libreoffice                       # один раз
+node tools/cli/convert-to-pdf.mjs --serve --port 7700
+```
+
+В Vite (env):
+
+```env
+VITE_CONVERT_TO_PDF_URL=http://localhost:7700/
+```
+
+Если ENV не выставлена — DOCX/PPTX-вход просто будет отклонён, PDF-вход
+работает как обычно.
+
+---
+
+## Локальный запуск (web)
+
+```bash
+bun install
+bun run dev       # http://localhost:5173
+bun run test      # vitest, 82 теста
+bun run typecheck # tsc -b
+```
+
+---
+
+## Что осталось (v2 work-in-progress)
+
+- [ ] подключить `runPipeline` из `src/lib/pipeline/pipeline.ts` в `App.tsx`
+      (сейчас всё ещё крутится старый `docPlanner`)
+- [ ] в `OriginalPreview.tsx` / `Preview.tsx` переключиться на `DocxView` /
+      `PptxView`
+- [ ] e2e-сценарий с реальным PDF и проверкой OMML в выходном DOCX
+- [ ] `redraw-figure.py` встроить в pipeline (server-side вызов из Pass 4)
+- [ ] провести «глобальный тест» на `~/Documents/Дымань входные данные/`
+
+---
 
 ## Стек
 
-- **Frontend:** React 19 + TypeScript + Vite 8
-- **Парсинг:** pdf.js, mammoth, кастомный PPTX-парсер, опционально MinerU
-- **Перевод:** Xiaomi MiMo API (`mimo-v2.5-pro` / `mimo-v2.5` / `mimo-v2-omni` / `mimo-v2-pro`, fallback-цепочка, retry). Эндпоинт — Сингапур (`https://token-plan-sgp.xiaomimimo.com/v1`), доступен из РФ без VPN.
-- **Сборка:** `docx@9` + LaTeX→OMML, кастомный PPTX-builder (JSZip + шаблон МИЭТ)
-- **Деплой:** GitHub Pages (статический SPA)
+- **Frontend:** React 19 + TypeScript + Vite 8 + Tailwind-style плоский CSS
+- **Парсинг PDF:** pdf.js (canvas + text layer)
+- **Перевод:** Xiaomi MiMo (Singapore endpoint, OpenAI-совместимый)
+- **Сборка DOCX:** `docx@9` + кастомный LaTeX→OMML
+- **Сборка PPTX:** кастомный builder поверх `src/assets/template.pptx`
+- **DOCX preview:** `docx-preview@0.3.x`
+- **PPTX preview:** LibreOffice headless → PDF → pdf.js
+- **Архивы:** `libarchive.js` (WASM) для rar/7z/tar, `jszip` для zip
 
-## Локальный запуск
-
-```bash
-npm install         # или bun install
-npm run dev         # http://localhost:5173
-```
-
-1. Открыть в браузере, в «Настройках» вставить MiMo (Xiaomi) API key
-   (получить — https://xiaomimimo.com).
-2. Перетащить файлы / папку / `.zip` / `.rar`.
-3. Распределить карточки: **DOCX**, **PPTX** или пропустить (свайп-дек).
-4. Нажать **Запустить**. Сначала прогонятся документы, потом презентации.
-5. **Скачать всё** — получишь `miet-translator-results.zip` с готовыми файлами + отчёт + лог.
-
-## Тесты
-
-```bash
-npm run test        # vitest (unit)
-npm run typecheck   # tsc -b
-npm run lint        # eslint
-```
-
-## Архитектура (3 слоя)
-
-1. **UI** (`src/App.tsx`, `src/components/*`) — загрузка, swipe-deck, очередь, превью.
-2. **Локальный runtime** (`src/lib/*`) — извлечение PDF/DOCX/PPTX, очереди задач,
-   сборка результата (`docxBuild.ts`, `pptxBuild.ts`).
-3. **Translation service** (`src/lib/mimo.ts`, `slidePlanner.ts`,
-   `docPlanner.ts`) — вызовы LLM, чанкинг, ретраи, единый промпт и глоссарий.
-
-MiMo-ключ хранится **только в localStorage** и никогда не уходит никуда,
-кроме самих запросов к Xiaomi MiMo.
-
-## Шаблон МИЭТ
-
-Лежит в `src/assets/template.pptx`. Структура layout'ов и маппинг — в
-`src/lib/pptxBuild.ts`. Шаблон не модифицируется — новый PPTX строится
-поверх него с заменой контента.
+---
 
 ## Лицензия и контекст
 
-Учебный проект (МИЭТ). Используй как fork-точку для своих переводческих задач.
+Учебный проект (МИЭТ). Используй как форк-точку для своих задач перевода.

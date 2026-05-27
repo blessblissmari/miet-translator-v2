@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "docx": "^9.6.1",
+    "docx-preview": "^0.3.6",
     "file-saver": "^2.0.5",
     "jszip": "^3.10.1",
     "katex": "^0.16.45",
