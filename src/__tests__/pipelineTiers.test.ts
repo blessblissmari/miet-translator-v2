@@ -6,7 +6,7 @@ describe("pipeline tiers", () => {
     expect(TIER_MODEL.OMNI_BEST).toBe("mimo-v2.5");
     expect(TIER_MODEL.OMNI_MID).toBe("mimo-v2-omni");
     expect(TIER_MODEL.REASON).toBe("mimo-v2.5-pro");
-    expect(TIER_MODEL.CHEAP).toBe("mimo-v2-flash");
+    expect(TIER_MODEL.CHEAP).toBe("mimo-v2-omni");
   });
 
   it("CHEAP is at least 4x cheaper than REASON on inputs", () => {

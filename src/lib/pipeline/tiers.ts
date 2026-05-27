@@ -12,12 +12,15 @@
 
 export type Tier = "OMNI_BEST" | "OMNI_MID" | "REASON" | "CHEAP";
 
-export const TIER_MODEL: Record<Tier, string> = {
+export const TIER_MODEL = {
   OMNI_BEST: "mimo-v2.5",
   OMNI_MID: "mimo-v2-omni",
   REASON: "mimo-v2.5-pro",
-  CHEAP: "mimo-v2-flash",
-};
+  // NOTE: docs list mimo-v2-flash ($0.10/$0.30) but the live API rejects
+  // it with "Not supported model". Until that changes, CHEAP shares the
+  // v2-omni endpoint (text-only calls; same $0.40/$2.00 as v2.5).
+  CHEAP: "mimo-v2-omni",
+} as const;
 
 /** Rough $/M input,output for budget logging. */
 export const TIER_PRICE: Record<Tier, { in: number; out: number }> = {
